@@ -55,3 +55,32 @@ setup — migrations, DB seeding, and startup queries all ran cleanly.)_
   actually `vector_weight=0.7 / keyword_weight=0.3`, so part of the work is confirming
   the real over-weighting mechanism (normalization + corpus-frequent terms) rather than
   just flipping a constant. I'll confirm the reproduction before proposing a fix.
+
+---
+
+## Week 8 — Reproduction & solution planning
+
+**Reproduction commit link:** https://github.com/25simsa1/pathreview/commit/ec47932a36d8730e6a16ad814f5786e89e5dc35f
+
+**Reproduction summary:**
+I added an `xfail(strict=True)` unit test (`tests/unit/test_hybrid_retriever.py`) that
+drives `HybridRetriever.retrieve()` with controlled vector/keyword results. On a "React"
+query, a wrong-document chunk that is only the top BM25 hit (zero vector similarity) is
+returned at a blended score of exactly `0.30` (== `keyword_weight`), clearing the default
+`min_score=0.30`. Bumping that chunk's BM25 from `8.0` to `800.0` leaves the score at
+`0.30`, confirming the root cause is per-list max-normalization discarding absolute
+magnitude. (The test is `xfail` so the suite stays green; it flips to a passing test once
+the fix lands in Week 9.)
+
+**PLAN.md link:** https://github.com/25simsa1/pathreview/blob/fix/24-hybrid-retriever-keyword-overweight/PLAN.md
+
+**Walkthrough video (recommended):** Not recorded.
+
+**Blockers or open questions:**
+- `HybridRetriever.retrieve()` and `keyword_searcher.index()` have no call sites in app
+  code (repo-wide, only tests reference them). The retriever doesn't appear wired into the
+  live request path, and `rag/generator/review_generator.py` takes `retrieved_chunks` from
+  a source I haven't identified yet. I need to confirm whether wiring is in scope for #24
+  before I change the public `score`/`min_score` contract.
+- If I switch to Reciprocal Rank Fusion the `score` scale changes, so I need to check every
+  consumer of the `score` field (`rag/generator/`, `rag/evaluator/`) first.
